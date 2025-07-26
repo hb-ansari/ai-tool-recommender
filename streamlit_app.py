@@ -98,7 +98,7 @@ def load_data():
 
 def create_sample_data():
     """Create sample data if main data source fails"""
-    import numpy as np
+    import random
     
     industries = ['Healthcare', 'Finance', 'Manufacturing', 'Education', 'Retail']
     years = [2020, 2021, 2022, 2023, 2024]
@@ -112,7 +112,7 @@ def create_sample_data():
                     'industry': industry,
                     'year': year,
                     'AI_tool': tool,
-                    'adoption_rate': np.random.randint(15, 85),
+                    'adoption_rate': random.randint(15, 85),
                     'user_feedback': f"Excellent tool for {industry.lower()} applications. Very effective in {year}."
                 })
     
@@ -121,6 +121,8 @@ def create_sample_data():
 # Helper function to find columns dynamically
 def find_column(df, keywords):
     """Find column containing any of the keywords (case-insensitive)"""
+    if df is None or df.empty:
+        return None
     for col in df.columns:
         for keyword in keywords:
             if keyword.lower() in col.lower():
@@ -154,35 +156,56 @@ if df.empty:
 
 # Sidebar filters with error handling
 try:
-    industry_filter = st.sidebar.selectbox("Select Industry", sorted(df["industry"].unique()))
-    year_filter = st.sidebar.selectbox("Select Year", sorted(df["year"].unique()))
-    filtered_df = df[(df["industry"] == industry_filter) & (df["year"] == year_filter)]
-except KeyError as e:
-    st.error(f"Required filter columns missing: {str(e)}")
+    if 'industry' in df.columns and 'year' in df.columns:
+        industry_options = sorted(df["industry"].dropna().unique())
+        year_options = sorted(df["year"].dropna().unique())
+        
+        industry_filter = st.sidebar.selectbox("Select Industry", industry_options)
+        year_filter = st.sidebar.selectbox("Select Year", year_options)
+        filtered_df = df[(df["industry"] == industry_filter) & (df["year"] == year_filter)]
+    else:
+        st.error("Required filter columns ('industry', 'year') not found in dataset")
+        st.write("Available columns:", list(df.columns))
+        st.stop()
+except Exception as e:
+    st.error(f"Error setting up filters: {str(e)}")
     st.stop()
 
 # Title
 st.title("🚀 AI Tool Recommender App – Smart Insights")
 st.subheader(f"🔍 Filtered AI Tools for {industry_filter} in {year_filter}")
-st.dataframe(filtered_df)
+
+if not filtered_df.empty:
+    st.dataframe(filtered_df)
+else:
+    st.warning(f"No data found for {industry_filter} in {year_filter}")
 
 # 📈 Adoption Trend
 st.markdown("### 📈 AI Tool Adoption Trend")
 try:
     adoption_col = find_column(df, ['adoption', 'rate'])
-    if adoption_col:
-        trend_df = df[df["industry"] == industry_filter].groupby("year")[adoption_col].mean().reset_index()
-        trend_chart = alt.Chart(trend_df).mark_line(point=True).encode(
-            x='year:O',
-            y=f'{adoption_col}:Q'
-        ).properties(
-            title=f"{industry_filter} - Adoption Rate Over Years"
-        )
-        st.altair_chart(trend_chart, use_container_width=True)
+    if adoption_col and adoption_col in df.columns:
+        trend_data = df[df["industry"] == industry_filter]
+        if not trend_data.empty:
+            trend_df = trend_data.groupby("year")[adoption_col].mean().reset_index()
+            if not trend_df.empty and len(trend_df) > 0:
+                trend_chart = alt.Chart(trend_df).mark_line(point=True).encode(
+                    x='year:O',
+                    y=f'{adoption_col}:Q'
+                ).properties(
+                    title=f"{industry_filter} - Adoption Rate Over Years"
+                )
+                st.altair_chart(trend_chart, use_container_width=True)
+            else:
+                st.info("No trend data available for the selected industry.")
+        else:
+            st.info("No data available for trend analysis.")
     else:
         st.warning("Adoption rate column not found in dataset.")
+        st.write("Available columns:", list(df.columns))
 except Exception as e:
     st.error(f"Error creating trend chart: {str(e)}")
+    st.write("Debug - Available columns:", list(df.columns) if not df.empty else "No data")
 
 # 💬 Sentiment Analysis
 st.markdown("### 💬 Sentiment Analysis")
@@ -192,18 +215,19 @@ if TEXTBLOB_AVAILABLE and nltk_success:
         feedback_col = find_column(df, ['feedback', 'review', 'comment'])
         tool_col = find_column(df, ['tool', 'ai'])
         
-        if feedback_col and tool_col:
+        if feedback_col and tool_col and feedback_col in df.columns and tool_col in df.columns:
             # Apply sentiment analysis with null handling
-            df["sentiment_score"] = df[feedback_col].apply(
+            sentiment_data = df.copy()
+            sentiment_data["sentiment_score"] = sentiment_data[feedback_col].apply(
                 lambda x: TextBlob(str(x)).sentiment.polarity if pd.notna(x) and str(x).strip() != '' else 0
             )
             
             # Group by tool and calculate average sentiment for selected industry
-            sentiment_data = df[df["industry"] == industry_filter]
-            if not sentiment_data.empty:
-                sentiment_avg = sentiment_data.groupby(tool_col)["sentiment_score"].mean().reset_index()
+            industry_data = sentiment_data[sentiment_data["industry"] == industry_filter]
+            if not industry_data.empty:
+                sentiment_avg = industry_data.groupby(tool_col)["sentiment_score"].mean().reset_index()
                 
-                if not sentiment_avg.empty:
+                if not sentiment_avg.empty and len(sentiment_avg) > 0:
                     sentiment_chart = alt.Chart(sentiment_avg).mark_bar().encode(
                         x=alt.X(f"{tool_col}:N", sort="-y"),
                         y="sentiment_score:Q",
@@ -219,11 +243,18 @@ if TEXTBLOB_AVAILABLE and nltk_success:
             else:
                 st.info("No data available for sentiment analysis with current filters.")
         else:
-            st.warning(f"Required columns not found. Feedback column: {feedback_col}, Tool column: {tool_col}")
+            missing_cols = []
+            if not feedback_col:
+                missing_cols.append("feedback/review column")
+            if not tool_col:
+                missing_cols.append("tool column")
+            
+            st.warning(f"Required columns not found: {', '.join(missing_cols)}")
             st.info("Available columns: " + ", ".join(df.columns))
             
     except Exception as e:
         st.error(f"Error in sentiment analysis: {str(e)}")
+        st.write("Debug info:", str(e))
 else:
     if not TEXTBLOB_AVAILABLE:
         st.info("💬 Sentiment Analysis disabled - TextBlob not available")
@@ -237,16 +268,16 @@ st.markdown("### 📤 Export Filtered Results")
 def check_wkhtmltopdf():
     try:
         import subprocess
-        result = subprocess.run(['which', 'wkhtmltopdf'], capture_output=True, text=True)
+        result = subprocess.run(['which', 'wkhtmltopdf'], capture_output=True, text=True, timeout=5)
         return result.returncode == 0
     except:
         return False
 
 if PDFKIT_AVAILABLE and check_wkhtmltopdf():
     try:
-        if st.button("Generate PDF"):
+        if st.button("Generate PDF") and not filtered_df.empty:
             with st.spinner("Generating PDF..."):
-                html = filtered_df.to_html(index=False)
+                html = filtered_df.to_html(index=False, escape=False)
                 pdf_file = "filtered_results.pdf"
                 
                 options = {
@@ -276,13 +307,14 @@ else:
     st.info("📄 PDF generation not available. Use CSV export instead.")
 
 # Alternative CSV download
-csv = filtered_df.to_csv(index=False)
-st.download_button(
-    "📥 Download as CSV",
-    csv,
-    file_name="AI_Tool_Report.csv",
-    mime="text/csv"
-)
+if not filtered_df.empty:
+    csv = filtered_df.to_csv(index=False)
+    st.download_button(
+        "📥 Download as CSV",
+        csv,
+        file_name="AI_Tool_Report.csv",
+        mime="text/csv"
+    )
 
 # 🤖 Google Gemini-Powered Summary
 st.markdown("### 🤖 Google Gemini AI Summary")
@@ -308,8 +340,9 @@ def get_gemini_summary(industry, year):
         top_tools = []
         if tool_col and adoption_col and not filtered_df.empty:
             try:
-                top_tools = filtered_df.nlargest(3, adoption_col)[tool_col].tolist()
-            except:
+                if tool_col in filtered_df.columns and adoption_col in filtered_df.columns:
+                    top_tools = filtered_df.nlargest(3, adoption_col)[tool_col].tolist()
+            except Exception:
                 pass
         
         prompt = f"""
@@ -352,18 +385,30 @@ if not filtered_df.empty:
         
         with col1:
             if adoption_col and adoption_col in filtered_df.columns:
-                avg_adoption = filtered_df[adoption_col].mean()
-                st.metric("Average Adoption Rate", f"{avg_adoption:.1f}%")
+                try:
+                    numeric_data = pd.to_numeric(filtered_df[adoption_col], errors='coerce')
+                    avg_adoption = numeric_data.mean()
+                    if pd.notna(avg_adoption):
+                        st.metric("Average Adoption Rate", f"{avg_adoption:.1f}%")
+                    else:
+                        st.metric("Average Adoption Rate", "No data")
+                except Exception:
+                    st.metric("Total Records", len(filtered_df))
             else:
                 st.metric("Total Records", len(filtered_df))
         
         with col2:
-            if tool_col and adoption_col and both in filtered_df.columns:
+            if tool_col and adoption_col and tool_col in filtered_df.columns and adoption_col in filtered_df.columns:
                 try:
-                    top_tool_idx = filtered_df[adoption_col].idxmax()
-                    top_tool = filtered_df.loc[top_tool_idx, tool_col]
-                    st.metric("Top Tool", str(top_tool)[:20] + "..." if len(str(top_tool)) > 20 else str(top_tool))
-                except:
+                    numeric_data = pd.to_numeric(filtered_df[adoption_col], errors='coerce')
+                    if not numeric_data.isna().all():
+                        top_tool_idx = numeric_data.idxmax()
+                        top_tool = filtered_df.loc[top_tool_idx, tool_col]
+                        display_tool = str(top_tool)[:20] + "..." if len(str(top_tool)) > 20 else str(top_tool)
+                        st.metric("Top Tool", display_tool)
+                    else:
+                        st.metric("Top Tool", "No data")
+                except Exception:
                     st.metric("Top Tool", "Analysis pending")
             else:
                 st.metric("Data Columns", len(filtered_df.columns))
@@ -372,25 +417,42 @@ if not filtered_df.empty:
             total_tools = len(filtered_df)
             st.metric("Total Tools", total_tools)
             
-        # Additional info
-        if adoption_col not in filtered_df.columns or tool_col not in filtered_df.columns:
-            st.info("💡 Some metrics may be limited due to dataset structure. Available columns: " + ", ".join(filtered_df.columns))
+        # Additional info about missing columns
+        missing_cols = []
+        if not adoption_col or adoption_col not in filtered_df.columns:
+            missing_cols.append("adoption rate")
+        if not tool_col or tool_col not in filtered_df.columns:
+            missing_cols.append("tool name")
+        
+        if missing_cols:
+            st.info(f"💡 Some metrics may be limited. Missing: {', '.join(missing_cols)}. Available columns: " + ", ".join(filtered_df.columns))
             
     except Exception as e:
         st.error(f"Error calculating metrics: {str(e)}")
+        # Show debug info
+        st.write("**Debug Info:**")
+        st.write(f"- Filtered data shape: {filtered_df.shape}")
+        st.write(f"- Available columns: {list(filtered_df.columns)}")
+        
         # Fallback metrics
-        col1.metric("Total Records", len(filtered_df))
-        col2.metric("Columns", len(filtered_df.columns))
-        col3.metric("Year", year_filter)
+        try:
+            col1.metric("Total Records", len(filtered_df))
+            col2.metric("Columns", len(filtered_df.columns))
+            col3.metric("Year", year_filter)
+        except Exception:
+            st.write("Unable to display fallback metrics")
         
 else:
     st.info("📊 No data available for the selected filters. Try different industry/year combinations.")
     
     # Show available combinations
-    if not df.empty:
-        available_combinations = df.groupby(['industry', 'year']).size().reset_index(name='count')
-        st.write("**Available data combinations:**")
-        st.dataframe(available_combinations)
+    if not df.empty and 'industry' in df.columns and 'year' in df.columns:
+        try:
+            available_combinations = df.groupby(['industry', 'year']).size().reset_index(name='count')
+            st.write("**Available data combinations:**")
+            st.dataframe(available_combinations)
+        except Exception as e:
+            st.write(f"Error showing available combinations: {str(e)}")
 
 # Footer with helpful information
 st.markdown("---")
@@ -410,5 +472,21 @@ If you encounter any errors:
 1. Check the **Data Structure & Debug Info** section above
 2. Try different industry/year combinations
 3. Refresh the page to reload data
-4. Contact support if issues persist
+4. The app will show debug information to help identify issues
 """)
+
+# System status
+with st.expander("🔧 System Status"):
+    st.write("**Library Status:**")
+    st.write(f"- Streamlit: ✅ {st.__version__}")
+    st.write(f"- Pandas: ✅ {pd.__version__}")
+    st.write(f"- TextBlob: {'✅' if TEXTBLOB_AVAILABLE else '❌'}")
+    st.write(f"- NLTK: {'✅' if NLTK_AVAILABLE else '❌'}")
+    st.write(f"- PDFKit: {'✅' if PDFKIT_AVAILABLE else '❌'}")
+    st.write(f"- Google Gemini: {'✅' if GEMINI_AVAILABLE else '❌'}")
+    
+    st.write("**Data Status:**")
+    st.write(f"- Dataset loaded: {'✅' if not df.empty else '❌'}")
+    st.write(f"- Filtered data: {'✅' if not filtered_df.empty else '❌'}")
+    st.write(f"- Total records: {len(df)}")
+    st.write(f"- Filtered records: {len(filtered_df)}")
