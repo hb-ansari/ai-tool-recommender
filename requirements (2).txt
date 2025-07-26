@@ -2,5 +2,7 @@ streamlit
 pandas
 altair
 textblob
+nltk
 pdfkit
+gdown
 requests
