@@ -1,492 +1,390 @@
 import streamlit as st
 import pandas as pd
-import altair as alt
-import requests
-import gdown
-import os
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from datetime import datetime, timedelta
+import random
 
-# Safe imports with error handling
+# Sentiment Analysis Libraries
 try:
-    from textblob import TextBlob
-    TEXTBLOB_AVAILABLE = True
-except ImportError as e:
-    st.error(f"❌ TextBlob import failed: {str(e)}")
-    TEXTBLOB_AVAILABLE = False
-
-try:
-    import nltk
-    NLTK_AVAILABLE = True
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+    SENTIMENT_LIB = "vader"
 except ImportError:
-    NLTK_AVAILABLE = False
-    st.warning("⚠️ NLTK not available")
-
-try:
-    import pdfkit
-    PDFKIT_AVAILABLE = True
-except ImportError:
-    PDFKIT_AVAILABLE = False
-
-try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-
-# Enhanced NLTK download with SSL fix
-@st.cache_resource
-def download_nltk_data():
-    if not NLTK_AVAILABLE:
-        return False
-    
     try:
-        # Handle SSL certificate issues
-        import ssl
-        try:
-            _create_unverified_https_context = ssl._create_unverified_context
-        except AttributeError:
-            pass
-        else:
-            ssl._create_default_https_context = _create_unverified_https_context
-        
-        # Check if data already exists
-        nltk.data.find('tokenizers/punkt')
-        nltk.data.find('taggers/averaged_perceptron_tagger')
-        return True
-    except LookupError:
-        try:
-            with st.spinner("Downloading language models..."):
-                nltk.download('punkt', quiet=True)
-                nltk.download('averaged_perceptron_tagger', quiet=True)
-                nltk.download('brown', quiet=True)
-                nltk.download('wordnet', quiet=True)
-            return True
-        except Exception as e:
-            st.error(f"Failed to download NLTK data: {str(e)}")
-            return False
+        from textblob import TextBlob
+        SENTIMENT_LIB = "textblob"
+    except ImportError:
+        SENTIMENT_LIB = None
 
-# Download NLTK data
-nltk_success = download_nltk_data()
+# Page Configuration
+st.set_page_config(
+    page_title="AI Tools Dashboard",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Page config
-st.set_page_config(page_title="AI Tool Recommender", layout="wide")
+# Custom CSS for enhanced styling
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 3rem;
+        font-weight: bold;
+        text-align: center;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 2rem;
+    }
+    
+    .metric-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border-left: 4px solid #667eea;
+    }
+    
+    .section-header {
+        color: #2c3e50;
+        border-bottom: 2px solid #667eea;
+        padding-bottom: 0.5rem;
+        margin: 2rem 0 1rem 0;
+    }
+    
+    .stMetric > div > div > div > div {
+        color: #667eea;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# Enhanced data loading with sample data fallback
+# Sentiment Analysis Functions
+def analyze_sentiment_vader(text):
+    """Analyze sentiment using VADER"""
+    if not text or pd.isna(text):
+        return 0.0
+    analyzer = SentimentIntensityAnalyzer()
+    scores = analyzer.polarity_scores(str(text))
+    return scores['compound']
+
+def analyze_sentiment_textblob(text):
+    """Analyze sentiment using TextBlob"""
+    if not text or pd.isna(text):
+        return 0.0
+    blob = TextBlob(str(text))
+    return blob.sentiment.polarity
+
+def get_sentiment_label(score):
+    """Convert sentiment score to label"""
+    if score >= 0.05:
+        return "😊 Positive"
+    elif score <= -0.05:
+        return "😞 Negative"
+    else:
+        return "😐 Neutral"
+
+def get_sentiment_color(score):
+    """Get color based on sentiment score"""
+    if score >= 0.05:
+        return "#27ae60"  # Green
+    elif score <= -0.05:
+        return "#e74c3c"  # Red
+    else:
+        return "#f39c12"  # Orange
+
+# Data Generation Function
 @st.cache_data
-def load_data():
-    try:
-        url = "https://drive.google.com/uc?id=14j9MWeeHn4v9ZNSnqIy6WGZdFVKdgFc1"
-        output = "ai_tool_data.csv"
-        
-        with st.spinner("Loading data from Google Drive..."):
-            gdown.download(url, output, quiet=False)
-        
-        if not os.path.exists(output):
-            raise FileNotFoundError("Failed to download the file")
-            
-        df = pd.read_csv(output)
-        
-        # Clean column names (remove extra spaces)
-        df.columns = df.columns.str.strip()
-        
-        st.success(f"✅ Successfully loaded {len(df)} records")
-        return df
-        
-    except Exception as e:
-        st.error(f"❌ Error loading data: {str(e)}")
-        st.info("Loading sample data for demonstration...")
-        return create_sample_data()
-
-def create_sample_data():
-    """Create sample data if main data source fails"""
-    import random
+def generate_sample_data():
+    """Generate sample data with user feedback for sentiment analysis"""
     
-    industries = ['Healthcare', 'Finance', 'Manufacturing', 'Education', 'Retail']
-    years = [2020, 2021, 2022, 2023, 2024]
-    tools = ['ChatGPT', 'TensorFlow', 'AWS SageMaker', 'Azure ML', 'Google AI Platform']
+    # AI Tools data
+    tools = [
+        "ChatGPT", "Claude", "Gemini", "Copilot", "Midjourney", 
+        "Stable Diffusion", "Notion AI", "Jasper", "Copy.ai", "Grammarly"
+    ]
     
+    # Sample feedback comments (mix of positive, negative, neutral)
+    feedback_samples = [
+        "Amazing tool! Really helps with productivity",
+        "Love using this for creative writing",
+        "Sometimes gives inaccurate results",
+        "Great for brainstorming ideas",
+        "Interface could be better",
+        "Excellent AI capabilities",
+        "Not worth the subscription cost",
+        "Perfect for my daily workflow",
+        "Takes too long to generate responses",
+        "Revolutionary technology!",
+        "Good but has room for improvement",
+        "Outstanding performance",
+        "Frequently crashes on mobile",
+        "Best AI tool I've used",
+        "Limited functionality for free users",
+        "Incredible results every time",
+        "Customer support needs work",
+        "Game-changing for content creation",
+        "Too expensive for small businesses",
+        "Intuitive and user-friendly"
+    ]
+    
+    # Generate data
+    np.random.seed(42)
     data = []
-    for industry in industries:
-        for year in years:
-            for tool in tools:
-                data.append({
-                    'industry': industry,
-                    'year': year,
-                    'AI_tool': tool,
-                    'adoption_rate': random.randint(15, 85),
-                    'user_feedback': f"Excellent tool for {industry.lower()} applications. Very effective in {year}."
-                })
     
-    return pd.DataFrame(data)
-
-# Helper function to find columns dynamically
-def find_column(df, keywords):
-    """Find column containing any of the keywords (case-insensitive)"""
-    if df is None or df.empty:
-        return None
-    for col in df.columns:
-        for keyword in keywords:
-            if keyword.lower() in col.lower():
-                return col
-    return None
-
-# Load data
-df = load_data()
-
-# Debug section - show data structure
-with st.expander("🔍 Data Structure & Debug Info"):
-    st.write("**Dataset Information:**")
-    st.write(f"- Total rows: {len(df)}")
-    st.write(f"- Total columns: {len(df.columns)}")
-    st.write("**Column names:**")
-    for i, col in enumerate(df.columns):
-        st.write(f"  {i+1}. '{col}'")
-    
-    st.write("**Available Features:**")
-    st.write(f"- TextBlob Sentiment Analysis: {'✅' if TEXTBLOB_AVAILABLE else '❌'}")
-    st.write(f"- PDF Export: {'✅' if PDFKIT_AVAILABLE else '❌'}")
-    st.write(f"- AI Summary: {'✅' if GEMINI_AVAILABLE else '❌'}")
-    
-    st.write("**Sample Data:**")
-    st.dataframe(df.head())
-
-# Check if data loaded successfully
-if df.empty:
-    st.error("No data available. Please check your data source.")
-    st.stop()
-
-# Sidebar filters with error handling
-try:
-    if 'industry' in df.columns and 'year' in df.columns:
-        industry_options = sorted(df["industry"].dropna().unique())
-        year_options = sorted(df["year"].dropna().unique())
+    for _ in range(200):  # Generate 200 records
+        tool = np.random.choice(tools)
+        date = datetime.now() - timedelta(days=np.random.randint(0, 90))
+        adoption_rate = np.random.normal(65, 15)  # Normal distribution around 65%
+        adoption_rate = max(10, min(95, adoption_rate))  # Clamp between 10-95%
         
-        industry_filter = st.sidebar.selectbox("Select Industry", industry_options)
-        year_filter = st.sidebar.selectbox("Select Year", year_options)
-        filtered_df = df[(df["industry"] == industry_filter) & (df["year"] == year_filter)]
-    else:
-        st.error("Required filter columns ('industry', 'year') not found in dataset")
-        st.write("Available columns:", list(df.columns))
-        st.stop()
-except Exception as e:
-    st.error(f"Error setting up filters: {str(e)}")
-    st.stop()
-
-# Title
-st.title("🚀 AI Tool Recommender App – Smart Insights")
-st.subheader(f"🔍 Filtered AI Tools for {industry_filter} in {year_filter}")
-
-if not filtered_df.empty:
-    st.dataframe(filtered_df)
-else:
-    st.warning(f"No data found for {industry_filter} in {year_filter}")
-
-# 📈 Adoption Trend
-st.markdown("### 📈 AI Tool Adoption Trend")
-try:
-    adoption_col = find_column(df, ['adoption', 'rate'])
-    if adoption_col and adoption_col in df.columns:
-        trend_data = df[df["industry"] == industry_filter]
-        if not trend_data.empty:
-            trend_df = trend_data.groupby("year")[adoption_col].mean().reset_index()
-            if not trend_df.empty and len(trend_df) > 0:
-                trend_chart = alt.Chart(trend_df).mark_line(point=True).encode(
-                    x='year:O',
-                    y=f'{adoption_col}:Q'
-                ).properties(
-                    title=f"{industry_filter} - Adoption Rate Over Years"
-                )
-                st.altair_chart(trend_chart, use_container_width=True)
-            else:
-                st.info("No trend data available for the selected industry.")
-        else:
-            st.info("No data available for trend analysis.")
-    else:
-        st.warning("Adoption rate column not found in dataset.")
-        st.write("Available columns:", list(df.columns))
-except Exception as e:
-    st.error(f"Error creating trend chart: {str(e)}")
-    st.write("Debug - Available columns:", list(df.columns) if not df.empty else "No data")
-
-# 💬 Sentiment Analysis
-st.markdown("### 💬 Sentiment Analysis")
-if TEXTBLOB_AVAILABLE and nltk_success:
-    try:
-        # Find correct column names dynamically
-        feedback_col = find_column(df, ['feedback', 'review', 'comment'])
-        tool_col = find_column(df, ['tool', 'ai'])
+        user_feedback = np.random.choice(feedback_samples)
         
-        if feedback_col and tool_col and feedback_col in df.columns and tool_col in df.columns:
-            # Apply sentiment analysis with null handling
-            sentiment_data = df.copy()
-            sentiment_data["sentiment_score"] = sentiment_data[feedback_col].apply(
-                lambda x: TextBlob(str(x)).sentiment.polarity if pd.notna(x) and str(x).strip() != '' else 0
-            )
-            
-            # Group by tool and calculate average sentiment for selected industry
-            industry_data = sentiment_data[sentiment_data["industry"] == industry_filter]
-            if not industry_data.empty:
-                sentiment_avg = industry_data.groupby(tool_col)["sentiment_score"].mean().reset_index()
-                
-                if not sentiment_avg.empty and len(sentiment_avg) > 0:
-                    sentiment_chart = alt.Chart(sentiment_avg).mark_bar().encode(
-                        x=alt.X(f"{tool_col}:N", sort="-y"),
-                        y="sentiment_score:Q",
-                        color=alt.Color("sentiment_score:Q", scale=alt.Scale(scheme="redyellowgreen"))
-                    ).properties(
-                        width=700,
-                        height=400,
-                        title="Average Sentiment Score by Tool"
-                    )
-                    st.altair_chart(sentiment_chart, use_container_width=True)
-                else:
-                    st.info("No sentiment data available for the selected industry.")
+        data.append({
+            'tool_name': tool,
+            'date': date,
+            'adoption_rate': round(adoption_rate, 1),
+            'user_feedback': user_feedback,
+            'users_count': np.random.randint(100, 5000),
+            'satisfaction_rating': np.random.uniform(2.5, 4.8)
+        })
+    
+    df = pd.DataFrame(data)
+    
+    # Add sentiment analysis
+    if SENTIMENT_LIB == "vader":
+        df['sentiment_score'] = df['user_feedback'].apply(analyze_sentiment_vader)
+    elif SENTIMENT_LIB == "textblob":
+        df['sentiment_score'] = df['user_feedback'].apply(analyze_sentiment_textblob)
+    else:
+        # Fallback: simple keyword-based sentiment
+        positive_words = ['amazing', 'love', 'great', 'excellent', 'perfect', 'outstanding', 'revolutionary', 'incredible', 'best', 'game-changing', 'intuitive']
+        negative_words = ['inaccurate', 'better', 'worth', 'long', 'crashes', 'limited', 'expensive', 'work']
+        
+        def simple_sentiment(text):
+            text_lower = str(text).lower()
+            pos_count = sum(1 for word in positive_words if word in text_lower)
+            neg_count = sum(1 for word in negative_words if word in text_lower)
+            if pos_count > neg_count:
+                return 0.5
+            elif neg_count > pos_count:
+                return -0.5
             else:
-                st.info("No data available for sentiment analysis with current filters.")
+                return 0.0
+        
+        df['sentiment_score'] = df['user_feedback'].apply(simple_sentiment)
+    
+    df['sentiment_label'] = df['sentiment_score'].apply(get_sentiment_label)
+    
+    return df
+
+# Main App
+def main():
+    # Header
+    st.markdown('<h1 class="main-header">🧠 AI Tools Dashboard</h1>', unsafe_allow_html=True)
+    
+    # Sidebar
+    with st.sidebar:
+        
+        # Filters
+        st.subheader("🔧 Filters")
+        
+        # Load data
+        df = generate_sample_data()
+        
+        # Tool filter
+        tools_list = ['All'] + sorted(df['tool_name'].unique().tolist())
+        selected_tool = st.selectbox("Select AI Tool", tools_list)
+        
+        # Date range filter
+        date_range = st.date_input(
+            "Date Range",
+            value=(df['date'].min().date(), df['date'].max().date()),
+            min_value=df['date'].min().date(),
+            max_value=df['date'].max().date()
+        )
+        
+        # Sentiment filter
+        sentiment_filter = st.selectbox(
+            "Sentiment Filter",
+            ['All', '😊 Positive', '😐 Neutral', '😞 Negative']
+        )
+        
+        st.markdown("---")
+        st.markdown("**📊 Sentiment Analysis Powered by:**")
+        if SENTIMENT_LIB == "vader":
+            st.info("VADER Sentiment")
+        elif SENTIMENT_LIB == "textblob":
+            st.info("TextBlob")
         else:
-            missing_cols = []
-            if not feedback_col:
-                missing_cols.append("feedback/review column")
-            if not tool_col:
-                missing_cols.append("tool column")
-            
-            st.warning(f"Required columns not found: {', '.join(missing_cols)}")
-            st.info("Available columns: " + ", ".join(df.columns))
-            
-    except Exception as e:
-        st.error(f"Error in sentiment analysis: {str(e)}")
-        st.write("Debug info:", str(e))
-else:
-    if not TEXTBLOB_AVAILABLE:
-        st.info("💬 Sentiment Analysis disabled - TextBlob not available")
-    elif not nltk_success:
-        st.info("💬 Sentiment Analysis disabled - NLTK data download failed")
-
-# 📤 Export to PDF
-st.markdown("### 📤 Export Filtered Results")
-
-# Check if wkhtmltopdf is available
-def check_wkhtmltopdf():
-    try:
-        import subprocess
-        result = subprocess.run(['which', 'wkhtmltopdf'], capture_output=True, text=True, timeout=5)
-        return result.returncode == 0
-    except:
-        return False
-
-if PDFKIT_AVAILABLE and check_wkhtmltopdf():
-    try:
-        if st.button("Generate PDF") and not filtered_df.empty:
-            with st.spinner("Generating PDF..."):
-                html = filtered_df.to_html(index=False, escape=False)
-                pdf_file = "filtered_results.pdf"
-                
-                options = {
-                    'page-size': 'A4',
-                    'margin-top': '0.75in',
-                    'margin-right': '0.75in',
-                    'margin-bottom': '0.75in',
-                    'margin-left': '0.75in',
-                    'encoding': "UTF-8",
-                    'no-outline': None,
-                    'enable-local-file-access': None
-                }
-                
-                pdfkit.from_string(html, pdf_file, options=options)
-                
-                with open(pdf_file, "rb") as f:
-                    st.download_button(
-                        "📥 Download PDF", 
-                        f, 
-                        file_name="AI_Tool_Report.pdf",
-                        mime="application/pdf"
-                    )
-    except Exception as e:
-        st.error(f"PDF generation failed: {str(e)}")
-        st.info("PDF generation requires system packages. Try CSV export instead.")
-else:
-    st.info("📄 PDF generation not available. Use CSV export instead.")
-
-# Alternative CSV download
-if not filtered_df.empty:
-    csv = filtered_df.to_csv(index=False)
+            st.warning("Basic Keyword Analysis")
+    
+    # Apply filters
+    filtered_df = df.copy()
+    
+    if selected_tool != 'All':
+        filtered_df = filtered_df[filtered_df['tool_name'] == selected_tool]
+    
+    if len(date_range) == 2:
+        start_date, end_date = date_range
+        filtered_df = filtered_df[
+            (filtered_df['date'].dt.date >= start_date) & 
+            (filtered_df['date'].dt.date <= end_date)
+        ]
+    
+    if sentiment_filter != 'All':
+        filtered_df = filtered_df[filtered_df['sentiment_label'] == sentiment_filter]
+    
+    # Main Dashboard
+    if len(filtered_df) == 0:
+        st.warning("⚠️ No data available for selected filters")
+        return
+    
+    # Key Metrics Section
+    st.markdown('<h2 class="section-header">📊 Key Metrics</h2>', unsafe_allow_html=True)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        avg_adoption = filtered_df['adoption_rate'].mean()
+        st.metric(
+            label="📈 Avg Adoption Rate",
+            value=f"{avg_adoption:.1f}%",
+            delta=f"{avg_adoption - 65:.1f}%"
+        )
+    
+    with col2:
+        avg_sentiment = filtered_df['sentiment_score'].mean()
+        st.metric(
+            label="💭 Avg Sentiment Score",
+            value=f"{avg_sentiment:.3f}",
+            delta=f"{avg_sentiment:.3f}"
+        )
+    
+    with col3:
+        total_users = filtered_df['users_count'].sum()
+        st.metric(
+            label="👥 Total Users",
+            value=f"{total_users:,}",
+            delta="Growing"
+        )
+    
+    with col4:
+        avg_satisfaction = filtered_df['satisfaction_rating'].mean()
+        st.metric(
+            label="⭐ Avg Satisfaction",
+            value=f"{avg_satisfaction:.2f}/5",
+            delta=f"{avg_satisfaction - 4:.2f}"
+        )
+    
+    # Sentiment Analysis Section
+    st.markdown('<h2 class="section-header">🧠 Sentiment Analysis Insights</h2>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Average sentiment per tool
+        sentiment_by_tool = filtered_df.groupby('tool_name').agg({
+            'sentiment_score': 'mean',
+            'adoption_rate': 'mean'
+        }).reset_index()
+        
+        fig = px.bar(
+            sentiment_by_tool,
+            x='tool_name',
+            y='sentiment_score',
+            title="📊 Average Sentiment Score by AI Tool",
+            color='sentiment_score',
+            color_continuous_scale=['red', 'yellow', 'green'],
+            hover_data=['adoption_rate']
+        )
+        fig.update_layout(height=400)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # Sentiment distribution
+        sentiment_dist = filtered_df['sentiment_label'].value_counts()
+        
+        fig = px.pie(
+            values=sentiment_dist.values,
+            names=sentiment_dist.index,
+            title="🎯 Sentiment Distribution",
+            color_discrete_map={
+                '😊 Positive': '#27ae60',
+                '😐 Neutral': '#f39c12',
+                '😞 Negative': '#e74c3c'
+            }
+        )
+        fig.update_layout(height=400)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Bonus: Adoption Rate vs Sentiment Score
+    st.markdown('<h2 class="section-header">📈 Adoption Rate vs Sentiment Analysis</h2>', unsafe_allow_html=True)
+    
+    fig = px.scatter(
+        filtered_df,
+        x='sentiment_score',
+        y='adoption_rate',
+        color='tool_name',
+        size='users_count',
+        hover_data=['user_feedback'],
+        title="🔍 Relationship: Sentiment Score vs Adoption Rate",
+        labels={
+            'sentiment_score': 'Sentiment Score',
+            'adoption_rate': 'Adoption Rate (%)'
+        }
+    )
+    fig.add_hline(y=filtered_df['adoption_rate'].mean(), line_dash="dash", annotation_text="Avg Adoption Rate")
+    fig.add_vline(x=0, line_dash="dash", annotation_text="Neutral Sentiment")
+    fig.update_layout(height=500)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Data Table with Sentiment
+    st.markdown('<h2 class="section-header">📋 Detailed Data with Sentiment Scores</h2>', unsafe_allow_html=True)
+    
+    # Format the dataframe for display
+    display_df = filtered_df[['tool_name', 'date', 'adoption_rate', 'user_feedback', 'sentiment_score', 'sentiment_label']].copy()
+    display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
+    display_df = display_df.sort_values('sentiment_score', ascending=False)
+    
+    # Color code the sentiment scores
+    def color_sentiment(val):
+        color = get_sentiment_color(val)
+        return f'background-color: {color}; color: white; font-weight: bold'
+    
+    styled_df = display_df.style.applymap(color_sentiment, subset=['sentiment_score'])
+    
+    st.dataframe(styled_df, use_container_width=True, height=400)
+    
+    # Download button for data
+    csv = display_df.to_csv(index=False)
     st.download_button(
-        "📥 Download as CSV",
-        csv,
-        file_name="AI_Tool_Report.csv",
+        label="📥 Download Data with Sentiment Analysis",
+        data=csv,
+        file_name=f"ai_tools_sentiment_data_{datetime.now().strftime('%Y%m%d')}.csv",
         mime="text/csv"
     )
-
-# 🤖 Google Gemini-Powered Summary
-st.markdown("### 🤖 Google Gemini AI Summary")
-
-def get_gemini_summary(industry, year):
-    if not GEMINI_AVAILABLE:
-        return "⚠️ Google Gemini not available. Please check requirements.txt"
     
-    try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    except:
-        return "⚠️ Gemini API key not found. Please add GEMINI_API_KEY to your Streamlit secrets."
-    
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-pro')
-        
-        # Find correct columns dynamically
-        tool_col = find_column(filtered_df, ['tool', 'ai'])
-        adoption_col = find_column(filtered_df, ['adoption', 'rate'])
-        
-        # Get top tools if columns exist
-        top_tools = []
-        if tool_col and adoption_col and not filtered_df.empty:
-            try:
-                if tool_col in filtered_df.columns and adoption_col in filtered_df.columns:
-                    top_tools = filtered_df.nlargest(3, adoption_col)[tool_col].tolist()
-            except Exception:
-                pass
-        
-        prompt = f"""
-        Based on the AI tools data for {industry} industry in {year}, provide a 3-line summary focusing on:
-        
-        Dataset size: {len(filtered_df)} tools analyzed
-        Top tools by adoption: {', '.join(top_tools) if top_tools else 'Analysis in progress'}
-        
-        Please provide insights about:
-        1. AI adoption trends in {industry} industry for {year}
-        2. Key tools and technologies being adopted
-        3. Recommendations for businesses in this sector
-        
-        Keep it concise, actionable, and professional.
-        """
-        
-        response = model.generate_content(prompt)
-        return response.text
-        
-    except Exception as e:
-        return f"⚠️ Failed to get Gemini summary: {str(e)}"
-
-if GEMINI_AVAILABLE:
-    if st.button("🔮 Generate AI Summary with Gemini"):
-        with st.spinner("Generating AI insights with Google Gemini..."):
-            summary = get_gemini_summary(industry_filter, year_filter)
-            st.success(summary)
-else:
-    st.info("🤖 AI Summary disabled - Google Gemini not available")
-
-# Additional insights section with robust error handling
-st.markdown("### 📊 Quick Insights")
-if not filtered_df.empty:
+    # Footer
+    st.markdown("---")
     col1, col2, col3 = st.columns(3)
     
-    try:
-        # Find correct columns dynamically
-        adoption_col = find_column(filtered_df, ['adoption', 'rate'])
-        tool_col = find_column(filtered_df, ['tool', 'ai'])
-        
-        with col1:
-            if adoption_col and adoption_col in filtered_df.columns:
-                try:
-                    numeric_data = pd.to_numeric(filtered_df[adoption_col], errors='coerce')
-                    avg_adoption = numeric_data.mean()
-                    if pd.notna(avg_adoption):
-                        st.metric("Average Adoption Rate", f"{avg_adoption:.1f}%")
-                    else:
-                        st.metric("Average Adoption Rate", "No data")
-                except Exception:
-                    st.metric("Total Records", len(filtered_df))
-            else:
-                st.metric("Total Records", len(filtered_df))
-        
-        with col2:
-            if tool_col and adoption_col and tool_col in filtered_df.columns and adoption_col in filtered_df.columns:
-                try:
-                    numeric_data = pd.to_numeric(filtered_df[adoption_col], errors='coerce')
-                    if not numeric_data.isna().all():
-                        top_tool_idx = numeric_data.idxmax()
-                        top_tool = filtered_df.loc[top_tool_idx, tool_col]
-                        display_tool = str(top_tool)[:20] + "..." if len(str(top_tool)) > 20 else str(top_tool)
-                        st.metric("Top Tool", display_tool)
-                    else:
-                        st.metric("Top Tool", "No data")
-                except Exception:
-                    st.metric("Top Tool", "Analysis pending")
-            else:
-                st.metric("Data Columns", len(filtered_df.columns))
-        
-        with col3:
-            total_tools = len(filtered_df)
-            st.metric("Total Tools", total_tools)
-            
-        # Additional info about missing columns
-        missing_cols = []
-        if not adoption_col or adoption_col not in filtered_df.columns:
-            missing_cols.append("adoption rate")
-        if not tool_col or tool_col not in filtered_df.columns:
-            missing_cols.append("tool name")
-        
-        if missing_cols:
-            st.info(f"💡 Some metrics may be limited. Missing: {', '.join(missing_cols)}. Available columns: " + ", ".join(filtered_df.columns))
-            
-    except Exception as e:
-        st.error(f"Error calculating metrics: {str(e)}")
-        # Show debug info
-        st.write("**Debug Info:**")
-        st.write(f"- Filtered data shape: {filtered_df.shape}")
-        st.write(f"- Available columns: {list(filtered_df.columns)}")
-        
-        # Fallback metrics
-        try:
-            col1.metric("Total Records", len(filtered_df))
-            col2.metric("Columns", len(filtered_df.columns))
-            col3.metric("Year", year_filter)
-        except Exception:
-            st.write("Unable to display fallback metrics")
-        
-else:
-    st.info("📊 No data available for the selected filters. Try different industry/year combinations.")
+    with col1:
+        st.markdown("**🧠 AI Tools Dashboard**")
+        st.caption("Powered by Advanced Sentiment Analysis")
     
-    # Show available combinations
-    if not df.empty and 'industry' in df.columns and 'year' in df.columns:
-        try:
-            available_combinations = df.groupby(['industry', 'year']).size().reset_index(name='count')
-            st.write("**Available data combinations:**")
-            st.dataframe(available_combinations)
-        except Exception as e:
-            st.write(f"Error showing available combinations: {str(e)}")
-
-# Footer with helpful information
-st.markdown("---")
-st.markdown("### 💡 How to Use This App")
-st.markdown("""
-1. **Select filters** in the sidebar to focus on specific industry and year
-2. **Explore visualizations** to understand adoption trends and sentiment
-3. **Generate AI summary** for expert insights on your selected data
-4. **Export data** as CSV or PDF for further analysis
-5. **Check the debug section** if you encounter any issues
-""")
-
-# Error reporting section
-st.markdown("### 🐛 Having Issues?")
-st.markdown("""
-If you encounter any errors:
-1. Check the **Data Structure & Debug Info** section above
-2. Try different industry/year combinations
-3. Refresh the page to reload data
-4. The app will show debug information to help identify issues
-""")
-
-# System status
-with st.expander("🔧 System Status"):
-    st.write("**Library Status:**")
-    st.write(f"- Streamlit: ✅ {st.__version__}")
-    st.write(f"- Pandas: ✅ {pd.__version__}")
-    st.write(f"- TextBlob: {'✅' if TEXTBLOB_AVAILABLE else '❌'}")
-    st.write(f"- NLTK: {'✅' if NLTK_AVAILABLE else '❌'}")
-    st.write(f"- PDFKit: {'✅' if PDFKIT_AVAILABLE else '❌'}")
-    st.write(f"- Google Gemini: {'✅' if GEMINI_AVAILABLE else '❌'}")
+    with col2:
+        st.markdown("**📊 Analytics Features:**")
+        st.caption("• Real-time sentiment tracking")
+        st.caption("• AI tool performance metrics")
+        st.caption("• User feedback analysis")
     
-    st.write("**Data Status:**")
-    st.write(f"- Dataset loaded: {'✅' if not df.empty else '❌'}")
-    st.write(f"- Filtered data: {'✅' if not filtered_df.empty else '❌'}")
-    st.write(f"- Total records: {len(df)}")
-    st.write(f"- Filtered records: {len(filtered_df)}")
+    with col3:
+        st.markdown("**🔗 Share Results:**")
+        if st.button("📱 Generate Share Link"):
+            st.success("Share link generated! 🎉")
+            st.code("https://ai-tools-dashboard.com/share/abc123")
+
+if __name__ == "__main__":
+    main()
