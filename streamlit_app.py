@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import random
+import altair as alt
 
 # Sentiment Analysis Libraries
 try:
@@ -20,7 +21,7 @@ except ImportError:
 
 # Page Configuration
 st.set_page_config(
-    page_title="AI Tools Dashboard",
+    page_title="AI Tools Dashboard - Trend Analysis",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -54,8 +55,50 @@ st.markdown("""
         margin: 2rem 0 1rem 0;
     }
     
+    .trend-subtitle {
+        color: #7f8c8d;
+        font-size: 1.1rem;
+        margin-bottom: 1rem;
+        text-align: center;
+    }
+    
+    .ranking-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+    }
+    
+    .growth-positive {
+        color: #27ae60;
+        font-weight: bold;
+    }
+    
+    .growth-negative {
+        color: #e74c3c;
+        font-weight: bold;
+    }
+    
     .stMetric > div > div > div > div {
         color: #667eea;
+    }
+    
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 24px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        padding-left: 20px;
+        padding-right: 20px;
+        background-color: #f0f2f6;
+        border-radius: 10px;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #667eea;
+        color: white;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -94,10 +137,10 @@ def get_sentiment_color(score):
     else:
         return "#f39c12"  # Orange
 
-# Data Generation Function
+# Enhanced Data Generation for Trends
 @st.cache_data
 def generate_sample_data():
-    """Generate sample data with user feedback for sentiment analysis"""
+    """Generate sample data with historical trends for better analysis"""
     
     # AI Tools data
     tools = [
@@ -105,7 +148,7 @@ def generate_sample_data():
         "Stable Diffusion", "Notion AI", "Jasper", "Copy.ai", "Grammarly"
     ]
     
-    # Sample feedback comments (mix of positive, negative, neutral)
+    # Sample feedback comments
     feedback_samples = [
         "Amazing tool! Really helps with productivity",
         "Love using this for creative writing",
@@ -129,26 +172,67 @@ def generate_sample_data():
         "Intuitive and user-friendly"
     ]
     
-    # Generate data
+    # Generate data with more structured time series
     np.random.seed(42)
     data = []
     
-    for _ in range(200):  # Generate 200 records
-        tool = np.random.choice(tools)
-        date = datetime.now() - timedelta(days=np.random.randint(0, 90))
-        adoption_rate = np.random.normal(65, 15)  # Normal distribution around 65%
-        adoption_rate = max(10, min(95, adoption_rate))  # Clamp between 10-95%
+    # Generate data for the last 2 years with monthly progression
+    start_date = datetime(2023, 1, 1)
+    end_date = datetime(2025, 1, 31)
+    
+    # Create base trends for each tool
+    tool_trends = {
+        "ChatGPT": {"base": 75, "trend": 0.8},
+        "Claude": {"base": 65, "trend": 1.2},
+        "Gemini": {"base": 60, "trend": 1.5},
+        "Copilot": {"base": 70, "trend": 0.5},
+        "Midjourney": {"base": 55, "trend": 0.7},
+        "Stable Diffusion": {"base": 50, "trend": 0.6},
+        "Notion AI": {"base": 45, "trend": 1.0},
+        "Jasper": {"base": 40, "trend": 0.3},
+        "Copy.ai": {"base": 35, "trend": 0.4},
+        "Grammarly": {"base": 80, "trend": 0.2}
+    }
+    
+    current_date = start_date
+    month_counter = 0
+    
+    while current_date <= end_date:
+        for tool in tools:
+            # Generate multiple records per tool per month
+            for _ in range(np.random.randint(5, 15)):
+                base_rate = tool_trends[tool]["base"]
+                trend_factor = tool_trends[tool]["trend"]
+                
+                # Add trend over time + some randomness
+                adoption_rate = (base_rate + 
+                               (month_counter * trend_factor) + 
+                               np.random.normal(0, 8))
+                adoption_rate = max(10, min(95, adoption_rate))
+                
+                # Add some random days within the month
+                random_day = np.random.randint(0, 28)
+                record_date = current_date + timedelta(days=random_day)
+                
+                user_feedback = np.random.choice(feedback_samples)
+                
+                data.append({
+                    'tool_name': tool,
+                    'date': record_date,
+                    'year': record_date.year,
+                    'month': record_date.month,
+                    'adoption_rate': round(adoption_rate, 1),
+                    'user_feedback': user_feedback,
+                    'users_count': np.random.randint(100, 5000),
+                    'satisfaction_rating': np.random.uniform(2.5, 4.8)
+                })
         
-        user_feedback = np.random.choice(feedback_samples)
-        
-        data.append({
-            'tool_name': tool,
-            'date': date,
-            'adoption_rate': round(adoption_rate, 1),
-            'user_feedback': user_feedback,
-            'users_count': np.random.randint(100, 5000),
-            'satisfaction_rating': np.random.uniform(2.5, 4.8)
-        })
+        # Move to next month
+        if current_date.month == 12:
+            current_date = current_date.replace(year=current_date.year + 1, month=1)
+        else:
+            current_date = current_date.replace(month=current_date.month + 1)
+        month_counter += 1
     
     df = pd.DataFrame(data)
     
@@ -179,15 +263,65 @@ def generate_sample_data():
     
     return df
 
+def create_trend_chart(df):
+    """Create interactive trend chart using Altair"""
+    # Prepare data for trends (monthly averages)
+    trend_data = df.groupby(['year', 'month', 'tool_name']).agg({
+        'adoption_rate': 'mean',
+        'sentiment_score': 'mean'
+    }).reset_index()
+    
+    # Create date column for proper time series
+    trend_data['date'] = pd.to_datetime(trend_data[['year', 'month']].assign(day=1))
+    
+    # Create the line chart
+    line_chart = alt.Chart(trend_data).mark_line(point=True, strokeWidth=3).add_selection(
+        alt.selection_multi(fields=['tool_name'])
+    ).encode(
+        x=alt.X('date:T', title='Date', axis=alt.Axis(format='%Y-%m')),
+        y=alt.Y('adoption_rate:Q', title='Adoption Rate (%)', scale=alt.Scale(domain=[0, 100])),
+        color=alt.Color('tool_name:N', title='AI Tool', scale=alt.Scale(scheme='category10')),
+        tooltip=['tool_name:N', 'date:T', 'adoption_rate:Q', 'sentiment_score:Q'],
+        opacity=alt.condition(alt.datum.tool_name, alt.value(0.8), alt.value(0.2))
+    ).properties(
+        width=800,
+        height=400,
+        title="📈 Adoption Trends of AI Tools (2023-2025)"
+    )
+    
+    return line_chart
+
+def get_top_tools_ranking(df, year):
+    """Get top 5 tools by adoption rate for a specific year"""
+    year_data = df[df['year'] == year]
+    ranking = year_data.groupby('tool_name').agg({
+        'adoption_rate': 'mean',
+        'sentiment_score': 'mean',
+        'users_count': 'sum'
+    }).reset_index()
+    
+    ranking = ranking.sort_values('adoption_rate', ascending=False).head(5)
+    ranking['rank'] = range(1, len(ranking) + 1)
+    
+    # Calculate growth compared to previous year if available
+    if year > 2023:
+        prev_year_data = df[df['year'] == year - 1]
+        prev_ranking = prev_year_data.groupby('tool_name')['adoption_rate'].mean()
+        
+        ranking['prev_adoption'] = ranking['tool_name'].map(prev_ranking)
+        ranking['growth'] = ((ranking['adoption_rate'] - ranking['prev_adoption']) / ranking['prev_adoption'] * 100).fillna(0)
+    else:
+        ranking['growth'] = 0
+    
+    return ranking
+
 # Main App
 def main():
     # Header
-    st.markdown('<h1 class="main-header">🧠 AI Tools Dashboard</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🧠 AI Tools Dashboard - Trend Analysis</h1>', unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
-        
-        # Filters
         st.subheader("🔧 Filters")
         
         # Load data
@@ -196,6 +330,10 @@ def main():
         # Tool filter
         tools_list = ['All'] + sorted(df['tool_name'].unique().tolist())
         selected_tool = st.selectbox("Select AI Tool", tools_list)
+        
+        # Year filter for trends
+        available_years = sorted(df['year'].unique())
+        selected_year = st.selectbox("Select Year for Rankings", available_years, index=len(available_years)-1)
         
         # Date range filter
         date_range = st.date_input(
@@ -278,93 +416,162 @@ def main():
             delta=f"{avg_satisfaction - 4:.2f}"
         )
     
-    # Sentiment Analysis Section
-    st.markdown('<h2 class="section-header">🧠 Sentiment Analysis Insights</h2>', unsafe_allow_html=True)
+    # NEW: Tabs Layout for organized content
+    tab1, tab2, tab3 = st.tabs(["📊 Filtered Data & Sentiment", "📈 Trends & Rankings", "🔍 Detailed Analysis"])
     
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        # Average sentiment per tool
-        sentiment_by_tool = filtered_df.groupby('tool_name').agg({
-            'sentiment_score': 'mean',
-            'adoption_rate': 'mean'
-        }).reset_index()
+    with tab1:
+        # Original sentiment analysis content
+        st.markdown('<h2 class="section-header">🧠 Sentiment Analysis Insights</h2>', unsafe_allow_html=True)
         
-        fig = px.bar(
-            sentiment_by_tool,
-            x='tool_name',
-            y='sentiment_score',
-            title="📊 Average Sentiment Score by AI Tool",
-            color='sentiment_score',
-            color_continuous_scale=['red', 'yellow', 'green'],
-            hover_data=['adoption_rate']
-        )
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        # Sentiment distribution
-        sentiment_dist = filtered_df['sentiment_label'].value_counts()
+        col1, col2 = st.columns([2, 1])
         
-        fig = px.pie(
-            values=sentiment_dist.values,
-            names=sentiment_dist.index,
-            title="🎯 Sentiment Distribution",
-            color_discrete_map={
-                '😊 Positive': '#27ae60',
-                '😐 Neutral': '#f39c12',
-                '😞 Negative': '#e74c3c'
+        with col1:
+            # Average sentiment per tool
+            sentiment_by_tool = filtered_df.groupby('tool_name').agg({
+                'sentiment_score': 'mean',
+                'adoption_rate': 'mean'
+            }).reset_index()
+            
+            fig = px.bar(
+                sentiment_by_tool,
+                x='tool_name',
+                y='sentiment_score',
+                title="📊 Average Sentiment Score by AI Tool",
+                color='sentiment_score',
+                color_continuous_scale=['red', 'yellow', 'green'],
+                hover_data=['adoption_rate']
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Sentiment distribution
+            sentiment_dist = filtered_df['sentiment_label'].value_counts()
+            
+            fig = px.pie(
+                values=sentiment_dist.values,
+                names=sentiment_dist.index,
+                title="🎯 Sentiment Distribution",
+                color_discrete_map={
+                    '😊 Positive': '#27ae60',
+                    '😐 Neutral': '#f39c12',
+                    '😞 Negative': '#e74c3c'
+                }
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Data Table with Sentiment
+        st.markdown('<h2 class="section-header">📋 Detailed Data with Sentiment Scores</h2>', unsafe_allow_html=True)
+        
+        # Format the dataframe for display
+        display_df = filtered_df[['tool_name', 'date', 'adoption_rate', 'user_feedback', 'sentiment_score', 'sentiment_label']].copy()
+        display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
+        display_df = display_df.sort_values('sentiment_score', ascending=False)
+        
+        st.dataframe(display_df, use_container_width=True, height=400)
+    
+    with tab2:
+        # NEW: Trends and Rankings Tab
+        st.markdown('<p class="trend-subtitle">📈 Adoption Trends of AI Tools (2023–2025)</p>', unsafe_allow_html=True)
+        
+        # Trend Chart using Altair
+        try:
+            trend_chart = create_trend_chart(df)  # Use full dataset for trends
+            st.altair_chart(trend_chart, use_container_width=True)
+        except Exception as e:
+            # Fallback to Plotly if Altair has issues
+            st.warning("Using Plotly chart as fallback")
+            trend_data = df.groupby(['year', 'month', 'tool_name']).agg({
+                'adoption_rate': 'mean'
+            }).reset_index()
+            trend_data['date'] = pd.to_datetime(trend_data[['year', 'month']].assign(day=1))
+            
+            fig = px.line(
+                trend_data,
+                x='date',
+                y='adoption_rate',
+                color='tool_name',
+                title="📈 Adoption Trends of AI Tools (2023-2025)",
+                markers=True
+            )
+            fig.update_layout(height=500)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Rankings Section
+        st.markdown('<p class="trend-subtitle">🏆 Top Performing Tools by Year</p>', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Top 5 Tools Ranking
+            ranking_df = get_top_tools_ranking(df, selected_year)
+            
+            st.markdown(f"### 🏆 Top 5 AI Tools - {selected_year}")
+            
+            for idx, row in ranking_df.iterrows():
+                growth_color = "growth-positive" if row['growth'] > 0 else "growth-negative" if row['growth'] < 0 else ""
+                growth_symbol = "📈" if row['growth'] > 0 else "📉" if row['growth'] < 0 else "➡️"
+                
+                with st.container():
+                    st.markdown(f"""
+                    <div class="ranking-card">
+                        <h4>#{row['rank']} {row['tool_name']}</h4>
+                        <p><strong>Adoption Rate:</strong> {row['adoption_rate']:.1f}%</p>
+                        <p><strong>Sentiment Score:</strong> {row['sentiment_score']:.3f}</p>
+                        <p><strong>Total Users:</strong> {row['users_count']:,}</p>
+                        <p class="{growth_color}"><strong>YoY Growth:</strong> {growth_symbol} {row['growth']:.1f}%</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        with col2:
+            # Year-over-year comparison chart
+            yearly_avg = df.groupby(['year', 'tool_name'])['adoption_rate'].mean().reset_index()
+            top_tools = ranking_df['tool_name'].head(3).tolist()
+            yearly_top = yearly_avg[yearly_avg['tool_name'].isin(top_tools)]
+            
+            fig = px.bar(
+                yearly_top,
+                x='year',
+                y='adoption_rate',
+                color='tool_name',
+                title=f"📊 Top 3 Tools Performance by Year",
+                barmode='group'
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with tab3:
+        # Bonus: Advanced Analysis
+        st.markdown('<h2 class="section-header">📈 Adoption Rate vs Sentiment Analysis</h2>', unsafe_allow_html=True)
+        
+        fig = px.scatter(
+            filtered_df,
+            x='sentiment_score',
+            y='adoption_rate',
+            color='tool_name',
+            size='users_count',
+            hover_data=['user_feedback'],
+            title="🔍 Relationship: Sentiment Score vs Adoption Rate",
+            labels={
+                'sentiment_score': 'Sentiment Score',
+                'adoption_rate': 'Adoption Rate (%)'
             }
         )
-        fig.update_layout(height=400)
+        fig.add_hline(y=filtered_df['adoption_rate'].mean(), line_dash="dash", annotation_text="Avg Adoption Rate")
+        fig.add_vline(x=0, line_dash="dash", annotation_text="Neutral Sentiment")
+        fig.update_layout(height=500)
         st.plotly_chart(fig, use_container_width=True)
-    
-    # Bonus: Adoption Rate vs Sentiment Score
-    st.markdown('<h2 class="section-header">📈 Adoption Rate vs Sentiment Analysis</h2>', unsafe_allow_html=True)
-    
-    fig = px.scatter(
-        filtered_df,
-        x='sentiment_score',
-        y='adoption_rate',
-        color='tool_name',
-        size='users_count',
-        hover_data=['user_feedback'],
-        title="🔍 Relationship: Sentiment Score vs Adoption Rate",
-        labels={
-            'sentiment_score': 'Sentiment Score',
-            'adoption_rate': 'Adoption Rate (%)'
-        }
-    )
-    fig.add_hline(y=filtered_df['adoption_rate'].mean(), line_dash="dash", annotation_text="Avg Adoption Rate")
-    fig.add_vline(x=0, line_dash="dash", annotation_text="Neutral Sentiment")
-    fig.update_layout(height=500)
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Data Table with Sentiment
-    st.markdown('<h2 class="section-header">📋 Detailed Data with Sentiment Scores</h2>', unsafe_allow_html=True)
-    
-    # Format the dataframe for display
-    display_df = filtered_df[['tool_name', 'date', 'adoption_rate', 'user_feedback', 'sentiment_score', 'sentiment_label']].copy()
-    display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
-    display_df = display_df.sort_values('sentiment_score', ascending=False)
-    
-    # Color code the sentiment scores
-    def color_sentiment(val):
-        color = get_sentiment_color(val)
-        return f'background-color: {color}; color: white; font-weight: bold'
-    
-    styled_df = display_df.style.applymap(color_sentiment, subset=['sentiment_score'])
-    
-    st.dataframe(styled_df, use_container_width=True, height=400)
-    
-    # Download button for data
-    csv = display_df.to_csv(index=False)
-    st.download_button(
-        label="📥 Download Data with Sentiment Analysis",
-        data=csv,
-        file_name=f"ai_tools_sentiment_data_{datetime.now().strftime('%Y%m%d')}.csv",
-        mime="text/csv"
-    )
+        
+        # Download button for data
+        display_df = filtered_df[['tool_name', 'date', 'year', 'adoption_rate', 'user_feedback', 'sentiment_score', 'sentiment_label']].copy()
+        csv = display_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Trend Analysis Data",
+            data=csv,
+            file_name=f"ai_tools_trend_analysis_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
     
     # Footer
     st.markdown("---")
@@ -372,19 +579,19 @@ def main():
     
     with col1:
         st.markdown("**🧠 AI Tools Dashboard**")
-        st.caption("Powered by Advanced Sentiment Analysis")
+        st.caption("Enhanced with Trend Analysis & Rankings")
     
     with col2:
-        st.markdown("**📊 Analytics Features:**")
-        st.caption("• Real-time sentiment tracking")
-        st.caption("• AI tool performance metrics")
-        st.caption("• User feedback analysis")
+        st.markdown("**📊 New Analytics Features:**")
+        st.caption("• Interactive trend charts")
+        st.caption("• Year-over-year growth tracking")
+        st.caption("• Top performers ranking")
     
     with col3:
         st.markdown("**🔗 Share Results:**")
-        if st.button("📱 Generate Share Link"):
-            st.success("Share link generated! 🎉")
-            st.code("https://ai-tools-dashboard.com/share/abc123")
+        if st.button("📱 Generate Trend Report"):
+            st.success("Trend analysis report generated! 🎉")
+            st.code("https://ai-tools-dashboard.com/trends/xyz789")
 
 if __name__ == "__main__":
     main()
