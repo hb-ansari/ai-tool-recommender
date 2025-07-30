@@ -43,13 +43,13 @@ except ImportError:
 
 # Page Configuration
 st.set_page_config(
-    page_title="AI Tools Dashboard - Trend Analysis",
+    page_title="AI Tools Dashboard - Trend Analysis & Export",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for enhanced styling (keeping your existing styles + new export section)
+# Custom CSS for enhanced styling
 st.markdown("""
 <style>
     .main-header {
@@ -134,6 +134,16 @@ st.markdown("""
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     }
     
+    .success-message {
+        background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+        text-align: center;
+        font-weight: bold;
+    }
+    
     .stMetric > div > div > div > div {
         color: #667eea;
     }
@@ -154,20 +164,10 @@ st.markdown("""
         background-color: #667eea;
         color: white;
     }
-    
-    .success-message {
-        background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
-        color: white;
-        padding: 1rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-        text-align: center;
-        font-weight: bold;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# Sentiment Analysis Functions (keeping your existing functions)
+# Sentiment Analysis Functions
 def analyze_sentiment_vader(text):
     """Analyze sentiment using VADER"""
     if not text or pd.isna(text):
@@ -444,7 +444,7 @@ def send_email_report(to_email, subject, body, attachment_data=None, attachment_
     except Exception as e:
         return False, f"Failed to send email: {str(e)}"
 
-# Keep all your existing data generation and analysis functions
+# Enhanced Data Generation for Trends
 @st.cache_data
 def generate_sample_data():
     """Generate sample data with historical trends for better analysis"""
@@ -625,7 +625,7 @@ def get_top_tools_ranking(df, year):
 # Main App
 def main():
     # Header
-    st.markdown('<h1 class="main-header">🧠 AI Tools Dashboard - Trend Analysis</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🧠 AI Tools Dashboard - Trend Analysis & Export</h1>', unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
@@ -706,4 +706,20 @@ def main():
         avg_sentiment = filtered_df['sentiment_score'].mean()
         st.metric(
             label="💭 Avg Sentiment Score",
-            value=f"{avg_sentiment:.3f
+            value=f"{avg_sentiment:.3f}",
+            delta=f"{avg_sentiment:.3f}"
+        )
+    
+    with col3:
+        total_users = filtered_df['users_count'].sum()
+        st.metric(
+            label="👥 Total Users",
+            value=f"{total_users:,}",
+            delta="Growing"
+        )
+    
+    with col4:
+        avg_satisfaction = filtered_df['satisfaction_rating'].mean()
+        st.metric(
+            label="⭐ Avg Satisfaction",
+            value=f"{avg_satisfaction:.2
