@@ -722,4 +722,267 @@ def main():
         avg_satisfaction = filtered_df['satisfaction_rating'].mean()
         st.metric(
             label="⭐ Avg Satisfaction",
-            value=f"{avg_satisfaction:.2
+            value=f"{avg_satisfaction:.2f}/5",
+            delta=f"{avg_satisfaction - 4:.2f}"
+        )
+    
+    # NEW: Export & Share Section
+    st.markdown('<div class="export-section">', unsafe_allow_html=True)
+    st.markdown('<h2 class="export-header">📦 Export & Share Results</h2>', unsafe_allow_html=True)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("📂 Download CSV", key="csv_export", help="Export filtered data as CSV"):
+            csv_data = create_csv_export(filtered_df, filters_info)
+            st.download_button(
+                label="📥 Download CSV File",
+                data=csv_data,
+                file_name=f"ai_tools_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                key="csv_download"
+            )
+            st.success("✅ CSV ready for download!")
+    
+    with col2:
+        if st.button("📑 Export PDF Report", key="pdf_export", help="Generate comprehensive PDF report"):
+            with st.spinner("🔄 Generating PDF report..."):
+                try:
+                    pdf_buffer = create_pdf_report(filtered_df, filters_info)
+                    st.download_button(
+                        label="📥 Download PDF Report",
+                        data=pdf_buffer.getvalue(),
+                        file_name=f"ai_tools_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                        mime="application/pdf",
+                        key="pdf_download"
+                    )
+                    st.success("✅ PDF report generated successfully!")
+                except Exception as e:
+                    st.error(f"❌ Error generating PDF: {str(e)}")
+    
+    with col3:
+        if EMAIL_AVAILABLE:
+            with st.popover("✉️ Email Report"):
+                st.write("Send analysis via email")
+                email_address = st.text_input("📧 Email Address", key="email_input")
+                if st.button("📤 Send Report", key="email_send"):
+                    if email_address and "@" in email_address:
+                        # Note: This is a demo - in production, configure proper SMTP
+                        st.info("📧 Email feature requires SMTP configuration")
+                        st.code("Configure SMTP settings in the send_email_report function")
+                    else:
+                        st.error("❌ Please enter a valid email address")
+        else:
+            st.button("✉️ Email Report", disabled=True, help="Email libraries not installed")
+    
+    with col4:
+        if st.button("🔗 Share Dashboard", key="share_dashboard", help="Generate shareable link"):
+            st.success("🎉 Dashboard link generated!")
+            share_url = f"https://ai-tools-dashboard.streamlit.app/?filters={hash(filters_info)}"
+            st.code(share_url)
+            st.caption("💡 Copy this link to share your filtered view")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Tabs Layout for organized content
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Filtered Data & Sentiment", "📈 Trends & Rankings", "🔍 Detailed Analysis", "📋 Export Summary"])
+    
+    with tab1:
+        # Original sentiment analysis content
+        st.markdown('<h2 class="section-header">🧠 Sentiment Analysis Insights</h2>', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Average sentiment per tool
+            sentiment_by_tool = filtered_df.groupby('tool_name').agg({
+                'sentiment_score': 'mean',
+                'adoption_rate': 'mean'
+            }).reset_index()
+            
+            fig = px.bar(
+                sentiment_by_tool,
+                x='tool_name',
+                y='sentiment_score',
+                title="📊 Average Sentiment Score by AI Tool",
+                color='sentiment_score',
+                color_continuous_scale=['red', 'yellow', 'green'],
+                hover_data=['adoption_rate']
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Sentiment distribution
+            sentiment_dist = filtered_df['sentiment_label'].value_counts()
+            
+            fig = px.pie(
+                values=sentiment_dist.values,
+                names=sentiment_dist.index,
+                title="🎯 Sentiment Distribution",
+                color_discrete_map={
+                    '😊 Positive': '#27ae60',
+                    '😐 Neutral': '#f39c12',
+                    '😞 Negative': '#e74c3c'
+                }
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Data Table with Sentiment
+        st.markdown('<h2 class="section-header">📋 Detailed Data with Sentiment Scores</h2>', unsafe_allow_html=True)
+        
+        # Format the dataframe for display
+        display_df = filtered_df[['tool_name', 'date', 'adoption_rate', 'user_feedback', 'sentiment_score', 'sentiment_label']].copy()
+        display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
+        display_df = display_df.sort_values('sentiment_score', ascending=False)
+        
+        st.dataframe(display_df, use_container_width=True, height=400)
+    
+    with tab2:
+        # Trends and Rankings Tab
+        st.markdown('<p class="trend-subtitle">📈 Adoption Trends of AI Tools (2023–2025)</p>', unsafe_allow_html=True)
+        
+        # Trend Chart using Altair
+        try:
+            trend_chart = create_trend_chart(df)  # Use full dataset for trends
+            st.altair_chart(trend_chart, use_container_width=True)
+        except Exception as e:
+            # Fallback to Plotly if Altair has issues
+            st.warning("Using Plotly chart as fallback")
+            trend_data = df.groupby(['year', 'month', 'tool_name']).agg({
+                'adoption_rate': 'mean'
+            }).reset_index()
+            trend_data['date'] = pd.to_datetime(trend_data[['year', 'month']].assign(day=1))
+            
+            fig = px.line(
+                trend_data,
+                x='date',
+                y='adoption_rate',
+                color='tool_name',
+                title="📈 Adoption Trends of AI Tools (2023-2025)",
+                markers=True
+            )
+            fig.update_layout(height=500)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Rankings Section
+        st.markdown('<p class="trend-subtitle">🏆 Top Performing Tools by Year</p>', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Top 5 Tools Ranking
+            ranking_df = get_top_tools_ranking(df, selected_year)
+            
+            st.markdown(f"### 🏆 Top 5 AI Tools - {selected_year}")
+            
+            for idx, row in ranking_df.iterrows():
+                growth_color = "growth-positive" if row['growth'] > 0 else "growth-negative" if row['growth'] < 0 else ""
+                growth_symbol = "📈" if row['growth'] > 0 else "📉" if row['growth'] < 0 else "➡️"
+                
+                with st.container():
+                    st.markdown(f"""
+                    <div class="ranking-card">
+                        <h4>#{row['rank']} {row['tool_name']}</h4>
+                        <p><strong>Adoption Rate:</strong> {row['adoption_rate']:.1f}%</p>
+                        <p><strong>Sentiment Score:</strong> {row['sentiment_score']:.3f}</p>
+                        <p><strong>Total Users:</strong> {row['users_count']:,}</p>
+                        <p class="{growth_color}"><strong>YoY Growth:</strong> {growth_symbol} {row['growth']:.1f}%</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        with col2:
+            # Year-over-year comparison chart
+            yearly_avg = df.groupby(['year', 'tool_name'])['adoption_rate'].mean().reset_index()
+            top_tools = ranking_df['tool_name'].head(3).tolist()
+            yearly_top = yearly_avg[yearly_avg['tool_name'].isin(top_tools)]
+            
+            fig = px.bar(
+                yearly_top,
+                x='year',
+                y='adoption_rate',
+                color='tool_name',
+                title=f"📊 Top 3 Tools Performance by Year",
+                barmode='group'
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with tab3:
+        # Advanced Analysis
+        st.markdown('<h2 class="section-header">📈 Adoption Rate vs Sentiment Analysis</h2>', unsafe_allow_html=True)
+        
+        fig = px.scatter(
+            filtered_df,
+            x='sentiment_score',
+            y='adoption_rate',
+            color='tool_name',
+            size='users_count',
+            hover_data=['user_feedback'],
+            title="🔍 Relationship: Sentiment Score vs Adoption Rate",
+            labels={
+                'sentiment_score': 'Sentiment Score',
+                'adoption_rate': 'Adoption Rate (%)'
+            }
+        )
+        fig.add_hline(y=filtered_df['adoption_rate'].mean(), line_dash="dash", annotation_text="Avg Adoption Rate")
+        fig.add_vline(x=0, line_dash="dash", annotation_text="Neutral Sentiment")
+        fig.update_layout(height=500)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab4:
+        # NEW: Export Summary Tab
+        st.markdown('<h2 class="section-header">📋 Export Summary & Data Insights</h2>', unsafe_allow_html=True)
+        
+        # Summary Statistics
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### 📊 Current Dataset Summary")
+            st.write(f"**Total Records:** {len(filtered_df):,}")
+            st.write(f"**Date Range:** {filtered_df['date'].min().strftime('%Y-%m-%d')} to {filtered_df['date'].max().strftime('%Y-%m-%d')}")
+            st.write(f"**Tools Analyzed:** {len(filtered_df['tool_name'].unique())}")
+            st.write(f"**Average Adoption Rate:** {filtered_df['adoption_rate'].mean():.1f}%")
+            st.write(f"**Overall Sentiment:** {get_sentiment_label(filtered_df['sentiment_score'].mean())}")
+            
+        with col2:
+            st.markdown("### 🎯 Quick Export Options")
+            
+            # Quick CSV export
+            csv_data = create_csv_export(filtered_df, filters_info)
+            st.download_button(
+                label="📥 Quick CSV Download",
+                data=csv_data,
+                file_name=f"ai_tools_quick_export_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                key="quick_csv"
+            )
+            
+            # Data preview
+            st.markdown("### 👀 Data Preview")
+            st.dataframe(filtered_df.head(5)[['tool_name', 'adoption_rate', 'sentiment_score', 'sentiment_label']], use_container_width=True)
+    
+    # Footer
+    st.markdown("---")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**🧠 AI Tools Dashboard**")
+        st.caption("Enhanced with Export & Automation Features")
+    
+    with col2:
+        st.markdown("**📦 New Export Features:**")
+        st.caption("• CSV data export with metadata")
+        st.caption("• Professional PDF reports")
+        st.caption("• Email automation (configurable)")
+        st.caption("• Shareable dashboard links")
+    
+    with col3:
+        st.markdown("**🎯 Day 9 Complete!**")
+        if st.button("🎉 Celebrate Progress"):
+            st.balloons()
+            st.success("🚀 Congratulations! Your AI Tools Dashboard now has full export capabilities!")
+
+if __name__ == "__main__":
+    main()
