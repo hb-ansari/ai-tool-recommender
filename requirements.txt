@@ -6,3 +6,4 @@ google-generativeai
 vaderSentiment
 textblob
 reportlab
+statsmodels
