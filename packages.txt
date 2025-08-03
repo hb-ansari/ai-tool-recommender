@@ -1,9 +1,48 @@
+# System packages for AI Tool Recommender Dashboard
+# Required for Streamlit Cloud deployment
+# These packages support PDF generation, image processing, and AI integrations
+
+# Python development packages
 python3-dev
 python3-distutils
 build-essential
+
+# Security and encryption libraries
 libffi-dev
 libssl-dev
+
+# Image processing libraries (for PDF generation and ReportLab)
 libjpeg-dev
 libpng-dev
 libfreetype6-dev
+
+# Package configuration
 pkg-config
+
+# Additional libraries for enhanced functionality
+libcairo2-dev
+libpango1.0-dev
+libgdk-pixbuf2.0-dev
+libxml2-dev
+libxslt1-dev
+
+# Font libraries for better PDF rendering
+fontconfig
+fonts-liberation
+fonts-dejavu-core
+
+# Mathematical libraries
+libopenblas-dev
+liblapack-dev
+
+# For potential video/audio processing
+libavcodec-dev
+libavformat-dev
+
+# Network and compression utilities
+zlib1g-dev
+libbz2-dev
+liblzma-dev
+
+# Git for version control (if needed)
+git
