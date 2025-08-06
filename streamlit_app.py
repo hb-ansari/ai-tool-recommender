@@ -9,6 +9,8 @@ import random
 import altair as alt
 import io
 import base64
+pip install google-generativeai
+
 
 # Gemini AI Integration
 try:
